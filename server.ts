@@ -993,8 +993,14 @@ async function setupServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`PulseHealth AI server running at http://0.0.0.0:${PORT}`);
+    console.log(`MedTrack AI / PulseHealth AI server running at http://0.0.0.0:${PORT}`);
   });
 }
 
-setupServer();
+// Export app for Vercel Serverless Function compatibility
+export default app;
+
+// Only start standalone HTTP server in non-serverless environments (local dev / container)
+if (!process.env.VERCEL) {
+  setupServer();
+}

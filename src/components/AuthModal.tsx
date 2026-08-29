@@ -283,10 +283,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <HeartPulse className="w-7 h-7" />
               </div>
               <h2 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight font-display">
-                Welcome to PulseHealth <span className="text-teal-600 dark:text-teal-400">AI</span>
+                Welcome to MedTrack <span className="text-teal-600 dark:text-teal-400">AI</span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
-                Sign in with your Email or Facebook to access personalized clinical triage &amp; health records.
+                Powered by PulseHealth AI. Sign in with your Email or Facebook to access personalized clinical triage &amp; health records.
               </p>
             </div>
 

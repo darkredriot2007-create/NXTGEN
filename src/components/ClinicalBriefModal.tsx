@@ -72,7 +72,7 @@ export const ClinicalBriefModal: React.FC<ClinicalBriefModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-lg sm:text-xl text-slate-900 dark:text-slate-100 tracking-tight font-display">
-                  PulseHealth AI
+                  MedTrack AI <span className="text-sm font-semibold text-teal-600 dark:text-teal-400 font-sans">&bull; PulseHealth AI</span>
                 </span>
                 <span className="text-xs font-bold text-teal-900 dark:text-teal-300 bg-teal-100/80 dark:bg-teal-950/80 border border-teal-200 dark:border-teal-800 px-2.5 py-0.5 rounded-full">
                   Clinical Intake Brief

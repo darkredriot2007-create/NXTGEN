@@ -1,6 +1,6 @@
 {
-  "name": "Remix Remix Remix Medtrack",
-  "description": "Medtrack - AI Public Health \u0026 Disease Awareness Assistant with personalized triage, multimodal vision pre-screening, biomarker extraction, and comprehensive clinical PDF exports.",
+  "name": "MedTrack AI - PulseHealth Assistant",
+  "description": "MedTrack AI & PulseHealth AI - AI Public Health & Disease Awareness Assistant: Track, Aware, Stay Healthy with multimodal vision pre-screening, biomarker extraction, and clinical PDF exports.",
   "requestFramePermissions": [
     "camera",
     "microphone",

@@ -96,10 +96,10 @@ export const OpeningScreen: React.FC<OpeningScreenProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-xl tracking-tight text-slate-900 dark:text-white font-outfit">
-                  Medtrack
+                  MedTrack <span className="text-teal-600 dark:text-teal-400">AI</span>
                 </span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-                  AI Public Health &amp; Disease Awareness
+                  PulseHealth AI Engine
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
@@ -123,7 +123,7 @@ export const OpeningScreen: React.FC<OpeningScreenProps> = ({
           <div className="lg:col-span-6 flex flex-col items-center lg:items-start text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/50 rounded-full text-xs font-semibold text-emerald-800 dark:text-emerald-300 mb-4">
               <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
-              <span>Next-Generation AI Health Triage</span>
+              <span>MedTrack AI &bull; PulseHealth AI System</span>
             </div>
 
             {/* Central Animated Hero Logo Container */}
@@ -136,7 +136,7 @@ export const OpeningScreen: React.FC<OpeningScreenProps> = ({
               Your Personal AI Public Health Assistant
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 leading-relaxed max-w-md">
-              Medtrack combines multimodal visual diagnostics, biomarker laboratory OCR, and customized health reminder alarms to help you stay ahead of health risks.
+              MedTrack AI and PulseHealth AI combine multimodal visual diagnostics, biomarker laboratory OCR, and customized health reminder alarms to help you stay ahead of health risks.
             </p>
 
             {/* Quick Action Buttons */}

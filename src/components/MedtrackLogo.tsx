@@ -137,10 +137,10 @@ export const MedtrackLogo: React.FC<MedtrackLogoProps> = ({
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">
             <span className="font-extrabold text-xl tracking-tight text-slate-900 dark:text-white font-outfit">
-              Medtrack
+              MedTrack <span className="text-teal-600 dark:text-teal-400">AI</span>
             </span>
             <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-              AI Health
+              PulseHealth AI
             </span>
           </div>
           <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium -mt-0.5">

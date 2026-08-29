@@ -85,23 +85,23 @@ export const Header: React.FC<HeaderProps> = ({
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-          {/* Medtrack Brand & Mission Statement */}
+          {/* Medtrack AI & PulseHealth AI Brand & Mission Statement */}
           <div className="flex items-center gap-3">
             <button
               id="header-brand-logo-btn"
               type="button"
               onClick={onOpenOpeningScreen}
               className="group flex items-center gap-2.5 text-left rounded-2xl p-1 -m-1 hover:bg-teal-50/70 dark:hover:bg-slate-800/70 transition-colors cursor-pointer"
-              title="Click to view Medtrack Overview & Features"
+              title="Click to view MedTrack AI & PulseHealth AI Overview & Features"
             >
               <MedtrackLogo size={36} animated={true} />
               <div className="flex flex-col">
                 <div className="flex items-center gap-1.5">
                   <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white font-outfit group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
-                    Medtrack
+                    MedTrack <span className="text-teal-600 dark:text-teal-400">AI</span>
                   </span>
                   <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.2 rounded-md bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/20">
-                    AI Health
+                    PulseHealth AI
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium -mt-0.5">
