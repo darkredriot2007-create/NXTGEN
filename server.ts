@@ -10,8 +10,8 @@ const app = express();
 const PORT = 3000;
 
 // Middleware for parsing JSON with generous limit for multimodal base64 image/file uploads
-app.use(express.json({ limit: '30mb' }));
-app.use(express.urlencoded({ extended: true, limit: '30mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Helper to normalize image/document MIME types for Gemini API
 function normalizeMimeType(mime: string = ''): string {
@@ -211,11 +211,10 @@ async function generateContentWithCascade(
     enableSearchGrounding = false,
   } = options;
 
-  // Optimized ordered sequence of fallback attempts for maximum speed and uptime:
-  // 1. Ultra-fast gemini-2.5-flash with Google Search grounding
-  // 2. Ultra-fast gemini-2.5-flash direct
-  // 3. gemini-3.1-flash-lite direct (sub-second inference)
-  // 4. gemini-3.7-flash (with thinking disabled for instant response)
+  // Optimized ordered sequence of fallback attempts for maximum accuracy, uptime and speed:
+  // 1. gemini-3.7-flash with Google Search grounding (if requested)
+  // 2. gemini-3.7-flash direct (with thinking budget set to 0 for rapid response)
+  // 3. gemini-3.1-flash-lite direct (sub-second fast tier)
   const attempts: Array<{
     model: string;
     withSearch: boolean;
@@ -224,11 +223,10 @@ async function generateContentWithCascade(
   }> = [];
 
   if (enableSearchGrounding) {
-    attempts.push({ model: 'gemini-2.5-flash', withSearch: true, timeoutMs: 5000 });
+    attempts.push({ model: 'gemini-3.7-flash', withSearch: true, disableThinking: true, timeoutMs: 15000 });
   }
-  attempts.push({ model: 'gemini-2.5-flash', withSearch: false, timeoutMs: 4500 });
-  attempts.push({ model: 'gemini-3.1-flash-lite', withSearch: false, timeoutMs: 4000 });
-  attempts.push({ model: 'gemini-3.7-flash', withSearch: false, disableThinking: true, timeoutMs: 5000 });
+  attempts.push({ model: 'gemini-3.7-flash', withSearch: false, disableThinking: true, timeoutMs: 12000 });
+  attempts.push({ model: 'gemini-3.1-flash-lite', withSearch: false, timeoutMs: 10000 });
 
   let lastError: any = null;
 
@@ -975,6 +973,18 @@ function getFallbackVision(symptomNotes?: string) {
     specialistToSee: 'Board-Certified Dermatologist / Primary Care Physician',
   };
 }
+
+// Global error handling middleware - always returns JSON, never HTML error pages
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Express Server Error caught:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  return res.status(err?.status || 500).json({
+    success: false,
+    error: err?.message || 'A server error occurred during request processing',
+  });
+});
 
 // Setup Vite middleware in dev or static files in production
 async function setupServer() {
