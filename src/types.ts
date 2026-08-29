@@ -227,3 +227,16 @@ export interface MedicalStore {
   stockedMedicines: StockedMedicineItem[];
   googleMapsUrl?: string;
 }
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ConsultationMessage[];
+  triageLevel?: TriageLevel;
+  profileName?: string;
+  summary?: string;
+  category?: 'general' | 'rash' | 'lab_report' | 'emergency' | 'prescription';
+}
+

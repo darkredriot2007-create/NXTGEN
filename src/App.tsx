@@ -6,9 +6,16 @@ import {
   TriageLevel,
   AuthUser,
   NotificationSettings,
+  ChatSession,
 } from './types';
 import { safeLocalStorageGet, safeLocalStorageSet, safeLocalStorageRemove } from './utils/safeStorage';
 import { PRESET_PROFILES } from './utils/healthCalculators';
+import {
+  getStoredChatSessions,
+  saveChatSessions,
+  generateSessionTitle,
+  createNewSession,
+} from './utils/sessionStorage';
 import {
   getStoredNotificationSettings,
   saveNotificationSettings,
@@ -21,6 +28,7 @@ import {
   ReminderContent,
 } from './utils/notifications';
 import { Header } from './components/Header';
+import { ChatHistorySidebar } from './components/ChatHistorySidebar';
 import { EmergencyBanner } from './components/EmergencyBanner';
 import { ConsultationFeed } from './components/ConsultationFeed';
 import { InputToolbar } from './components/InputToolbar';
@@ -62,7 +70,19 @@ export default function App() {
     return PRESET_PROFILES[0]; // Alex Rivera default
   });
 
+  // Chat Sessions and History Management
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => getStoredChatSessions());
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    const sessions = getStoredChatSessions();
+    return sessions[0]?.id || 'session_default';
+  });
+
   const [messages, setMessages] = useState<ConsultationMessage[]>(() => {
+    const sessions = getStoredChatSessions();
+    const active = sessions[0];
+    if (active && active.messages && active.messages.length > 0) {
+      return active.messages;
+    }
     const saved = safeLocalStorageGet('pulsehealth_messages');
     if (saved) {
       try {
@@ -72,6 +92,13 @@ export default function App() {
       }
     }
     return [];
+  });
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
   });
 
   // Notification and daily reminder settings
@@ -146,14 +173,50 @@ export default function App() {
     safeLocalStorageSet('pulsehealth_profile', JSON.stringify(currentProfile));
   }, [currentProfile]);
 
+  // Auto-sync active session with messages
   useEffect(() => {
-    // Keep the last 20 messages and prune heavy raw base64 data to avoid 5MB quota errors
+    setChatSessions((prevSessions) => {
+      const existingIndex = prevSessions.findIndex((s) => s.id === activeSessionId);
+      if (existingIndex >= 0) {
+        const existing = prevSessions[existingIndex];
+        const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant');
+        const updatedSession: ChatSession = {
+          ...existing,
+          messages,
+          updatedAt: new Date().toISOString(),
+          triageLevel: lastAssistantMsg?.triageLevel || existing.triageLevel,
+          title:
+            (existing.title === 'New Consultation' || !existing.title) && messages.length > 0
+              ? generateSessionTitle(messages[0].content)
+              : existing.title,
+        };
+        const newSessions = [...prevSessions];
+        newSessions[existingIndex] = updatedSession;
+        saveChatSessions(newSessions);
+        return newSessions;
+      } else if (messages.length > 0) {
+        const newSession: ChatSession = {
+          id: activeSessionId,
+          title: generateSessionTitle(messages[0].content),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages,
+          triageLevel: messages.find((m) => m.triageLevel)?.triageLevel,
+          profileName: currentProfile.name,
+        };
+        const newSessions = [newSession, ...prevSessions];
+        saveChatSessions(newSessions);
+        return newSessions;
+      }
+      return prevSessions;
+    });
+
+    // Also persist simple messages fallback
     try {
       const lightweightMsgs = messages.slice(-20).map((msg) => ({
         ...msg,
         attachments: msg.attachments?.map((att) => ({
           ...att,
-          // If attachment data is large base64 image (> 10KB), avoid bloating localStorage
           data: typeof att.data === 'string' && att.data.length > 10000 ? '' : att.data,
           previewUrl: typeof att.previewUrl === 'string' && att.previewUrl.length > 10000 ? '' : att.previewUrl,
         })),
@@ -162,7 +225,7 @@ export default function App() {
     } catch (e) {
       console.warn('Could not persist messages to localStorage:', e);
     }
-  }, [messages]);
+  }, [messages, activeSessionId, currentProfile.name]);
 
   useEffect(() => {
     saveNotificationSettings(notificationSettings);
@@ -558,6 +621,57 @@ export default function App() {
     handleSendMessage(prompt, attachments);
   };
 
+  // Session Management Handlers
+  const handleSelectSession = (sessionId: string) => {
+    if (sessionId === activeSessionId) return;
+    const target = chatSessions.find((s) => s.id === sessionId);
+    if (target) {
+      setActiveSessionId(sessionId);
+      setMessages(target.messages || []);
+      setIsEmergencyBannerOpen(
+        (target.messages || []).some((m) => m.triageLevel?.includes('Level 4') || m.isEmergencyOverride)
+      );
+    }
+  };
+
+  const handleNewSession = () => {
+    const fresh = createNewSession(currentProfile);
+    setChatSessions((prev) => [fresh, ...prev]);
+    setActiveSessionId(fresh.id);
+    setMessages([]);
+    setIsEmergencyBannerOpen(false);
+  };
+
+  const handleDeleteSession = (sessionId: string) => {
+    setChatSessions((prev) => {
+      const updated = prev.filter((s) => s.id !== sessionId);
+      saveChatSessions(updated);
+      if (activeSessionId === sessionId) {
+        const nextSession = updated[0] || createNewSession(currentProfile);
+        setActiveSessionId(nextSession.id);
+        setMessages(nextSession.messages || []);
+      }
+      return updated;
+    });
+  };
+
+  const handleRenameSession = (sessionId: string, newTitle: string) => {
+    setChatSessions((prev) => {
+      const updated = prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s));
+      saveChatSessions(updated);
+      return updated;
+    });
+  };
+
+  const handleClearAllSessions = () => {
+    const fresh = createNewSession(currentProfile);
+    setChatSessions([fresh]);
+    setActiveSessionId(fresh.id);
+    setMessages([]);
+    saveChatSessions([fresh]);
+    setIsEmergencyBannerOpen(false);
+  };
+
   const handleResetConsultation = () => {
     stopActiveRingtone();
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -570,7 +684,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-linear-to-b from-[#F0FDF4]/30 via-[#F8FAFC] to-[#F0F9FF]/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex flex-col font-sans selection:bg-teal-200 dark:selection:bg-teal-800 selection:text-teal-950 dark:selection:text-teal-100 transition-colors duration-300">
-      {/* Top Header */}
+      {/* Top Header with Brand and Unified Features Hub */}
       <Header
         currentProfile={currentProfile}
         currentUser={currentUser}
@@ -590,68 +704,92 @@ export default function App() {
           setPharmacyInitialMeds(currentProfile.healthHistory.currentMedications || []);
           setIsPharmacyModalOpen(true);
         }}
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+        onNewSession={handleNewSession}
       />
 
-      {/* Prominent Daily Health Notification & Reminder Bar */}
-      <NotificationBar
-        settings={notificationSettings}
-        onUpdateSettings={(newSettings) => setNotificationSettings(newSettings)}
-        onTriggerTestNotification={handleTriggerTestNotification}
-        onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
-        onOpenProfileModal={() => setIsProfileModalOpen(true)}
-        currentProfile={currentProfile}
-      />
-
-      {/* Front-End Welcome & Opening Screen with Custom Logo */}
-      {isOpeningScreenOpen && (
-        <OpeningScreen
-          userProfile={currentProfile}
-          onStartConsultation={() => {
-            setIsOpeningScreenOpen(false);
-            sessionStorage.setItem('medtrack_seen_opening_screen', 'true');
-          }}
-          onOpenProfile={() => {
-            setIsOpeningScreenOpen(false);
-            setIsProfileModalOpen(true);
-          }}
-          onOpenReminders={() => {
-            setIsOpeningScreenOpen(false);
-            setIsReminderSettingsOpen(true);
-          }}
-        />
-      )}
-
-      {/* Emergency Red-Flag Banner (Sticky/Dismissable) */}
-      <EmergencyBanner
-        isOpen={isEmergencyBannerOpen}
-        onClose={() => setIsEmergencyBannerOpen(false)}
-      />
-
-      {/* Main Consultation Feed */}
-      <main className="flex-1 overflow-y-auto">
-        <ConsultationFeed
-          messages={messages}
+      {/* Main Dashboard Layout with Left Sidebar + Feed Area */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left Side Dashboard: Chat History */}
+        <ChatHistorySidebar
+          isOpen={isSidebarOpen}
+          onToggle={() => setIsSidebarOpen((prev) => !prev)}
+          sessions={chatSessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
+          onClearAllSessions={handleClearAllSessions}
           currentProfile={currentProfile}
-          isLoading={isLoading}
           onOpenProfileModal={() => setIsProfileModalOpen(true)}
-          onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
-          onOpenPharmacyLocator={(meds) => {
-            if (meds && meds.length > 0) {
-              setPharmacyInitialMeds(meds);
-            } else {
-              setPharmacyInitialMeds(currentProfile.healthHistory.currentMedications || []);
-            }
-            setIsPharmacyModalOpen(true);
-          }}
         />
-      </main>
 
-      {/* Multimodal Input Toolbar */}
-      <InputToolbar
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-        onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
-      />
+        {/* Center / Right Main Content Workspace */}
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          {/* Prominent Daily Health Notification & Reminder Bar */}
+          <NotificationBar
+            settings={notificationSettings}
+            onUpdateSettings={(newSettings) => setNotificationSettings(newSettings)}
+            onTriggerTestNotification={handleTriggerTestNotification}
+            onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
+            onOpenProfileModal={() => setIsProfileModalOpen(true)}
+            currentProfile={currentProfile}
+          />
+
+          {/* Front-End Welcome & Opening Screen with Custom Logo */}
+          {isOpeningScreenOpen && (
+            <OpeningScreen
+              userProfile={currentProfile}
+              onStartConsultation={() => {
+                setIsOpeningScreenOpen(false);
+                sessionStorage.setItem('medtrack_seen_opening_screen', 'true');
+              }}
+              onOpenProfile={() => {
+                setIsOpeningScreenOpen(false);
+                setIsProfileModalOpen(true);
+              }}
+              onOpenReminders={() => {
+                setIsOpeningScreenOpen(false);
+                setIsReminderSettingsOpen(true);
+              }}
+            />
+          )}
+
+          {/* Emergency Red-Flag Banner (Sticky/Dismissable) */}
+          <EmergencyBanner
+            isOpen={isEmergencyBannerOpen}
+            onClose={() => setIsEmergencyBannerOpen(false)}
+          />
+
+          {/* Main Consultation Feed */}
+          <main className="flex-1 overflow-y-auto">
+            <ConsultationFeed
+              messages={messages}
+              currentProfile={currentProfile}
+              isLoading={isLoading}
+              onOpenProfileModal={() => setIsProfileModalOpen(true)}
+              onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
+              onOpenPharmacyLocator={(meds) => {
+                if (meds && meds.length > 0) {
+                  setPharmacyInitialMeds(meds);
+                } else {
+                  setPharmacyInitialMeds(currentProfile.healthHistory.currentMedications || []);
+                }
+                setIsPharmacyModalOpen(true);
+              }}
+            />
+          </main>
+
+          {/* Multimodal Input Toolbar */}
+          <InputToolbar
+            onSendMessage={handleSendMessage}
+            isLoading={isLoading}
+            onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
+          />
+        </div>
+      </div>
 
       {/* User Profile & Baseline Editor Modal */}
       <ProfileModal
