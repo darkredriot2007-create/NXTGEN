@@ -1,0 +1,12 @@
+{
+  "name": "Remix Remix Remix Medtrack",
+  "description": "Medtrack - AI Public Health \u0026 Disease Awareness Assistant with personalized triage, multimodal vision pre-screening, biomarker extraction, and comprehensive clinical PDF exports.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

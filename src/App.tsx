@@ -1,0 +1,657 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  UserProfile,
+  ConsultationMessage,
+  AttachmentItem,
+  TriageLevel,
+  AuthUser,
+  NotificationSettings,
+} from './types';
+import { safeLocalStorageGet, safeLocalStorageSet, safeLocalStorageRemove } from './utils/safeStorage';
+import { PRESET_PROFILES } from './utils/healthCalculators';
+import {
+  getStoredNotificationSettings,
+  saveNotificationSettings,
+  getReminderContent,
+  dispatchBrowserNotification,
+  playNotificationRingtone,
+  playGentleNotificationChime,
+  stopActiveRingtone,
+  setupBrowserAudioPolicyUnlock,
+  ReminderContent,
+} from './utils/notifications';
+import { Header } from './components/Header';
+import { EmergencyBanner } from './components/EmergencyBanner';
+import { ConsultationFeed } from './components/ConsultationFeed';
+import { InputToolbar } from './components/InputToolbar';
+import { ProfileModal } from './components/ProfileModal';
+import { SampleScenariosModal } from './components/SampleScenariosModal';
+import { ClinicalBriefModal } from './components/ClinicalBriefModal';
+import { AuthModal } from './components/AuthModal';
+import { ReminderSettingsModal } from './components/ReminderSettingsModal';
+import { ReminderToast } from './components/ReminderToast';
+import { TesterHubModal } from './components/TesterHubModal';
+import { OpeningScreen } from './components/OpeningScreen';
+import { PharmacyLocatorModal } from './components/PharmacyLocatorModal';
+import { NotificationBar } from './components/NotificationBar';
+
+export default function App() {
+  // Authentication user state
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    const saved = safeLocalStorageGet('pulsehealth_auth_user');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved auth user:', e);
+      }
+    }
+    return null;
+  });
+
+  // Local storage state initialization
+  const [currentProfile, setCurrentProfile] = useState<UserProfile>(() => {
+    const saved = safeLocalStorageGet('pulsehealth_profile');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved profile:', e);
+      }
+    }
+    return PRESET_PROFILES[0]; // Alex Rivera default
+  });
+
+  const [messages, setMessages] = useState<ConsultationMessage[]>(() => {
+    const saved = safeLocalStorageGet('pulsehealth_messages');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse saved messages:', e);
+      }
+    }
+    return [];
+  });
+
+  // Notification and daily reminder settings
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() =>
+    getStoredNotificationSettings()
+  );
+  const [isReminderSettingsOpen, setIsReminderSettingsOpen] = useState(false);
+  const [activeReminderToast, setActiveReminderToast] = useState<ReminderContent | null>(null);
+
+  // Dark mode state management with localStorage & system preference fallback
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const saved = safeLocalStorageGet('pulsehealth_dark_mode');
+    if (saved !== null) {
+      return saved === 'true';
+    }
+    return (
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    );
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [isEmergencyBannerOpen, setIsEmergencyBannerOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSampleScenariosOpen, setIsSampleScenariosOpen] = useState(false);
+  const [isClinicalBriefOpen, setIsClinicalBriefOpen] = useState(false);
+  const [isTesterHubOpen, setIsTesterHubOpen] = useState(false);
+  const [isPharmacyModalOpen, setIsPharmacyModalOpen] = useState(false);
+  const [pharmacyInitialMeds, setPharmacyInitialMeds] = useState<string[]>([]);
+  
+  // Front-end opening welcome screen with custom logo
+  const [isOpeningScreenOpen, setIsOpeningScreenOpen] = useState<boolean>(() => {
+    try {
+      const dismissed = sessionStorage.getItem('medtrack_seen_opening_screen');
+      return !dismissed;
+    } catch {
+      return false;
+    }
+  });
+
+  // When user opens website, ask to login or sign in if not authenticated
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+
+  // Apply dark mode class to document element and persist in localStorage
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    safeLocalStorageSet('pulsehealth_dark_mode', darkMode ? 'true' : 'false');
+  }, [darkMode]);
+
+  // Sync to local storage
+  useEffect(() => {
+    if (currentUser) {
+      safeLocalStorageSet('pulsehealth_auth_user', JSON.stringify(currentUser));
+    } else {
+      safeLocalStorageRemove('pulsehealth_auth_user');
+    }
+  }, [currentUser]);
+
+  // Set up global browser audio policy unlocking for autoplay compliance
+  useEffect(() => {
+    const cleanupAudioUnlock = setupBrowserAudioPolicyUnlock();
+    return cleanupAudioUnlock;
+  }, []);
+
+  useEffect(() => {
+    safeLocalStorageSet('pulsehealth_profile', JSON.stringify(currentProfile));
+  }, [currentProfile]);
+
+  useEffect(() => {
+    // Keep the last 20 messages and prune heavy raw base64 data to avoid 5MB quota errors
+    try {
+      const lightweightMsgs = messages.slice(-20).map((msg) => ({
+        ...msg,
+        attachments: msg.attachments?.map((att) => ({
+          ...att,
+          // If attachment data is large base64 image (> 10KB), avoid bloating localStorage
+          data: typeof att.data === 'string' && att.data.length > 10000 ? '' : att.data,
+          previewUrl: typeof att.previewUrl === 'string' && att.previewUrl.length > 10000 ? '' : att.previewUrl,
+        })),
+      }));
+      safeLocalStorageSet('pulsehealth_messages', JSON.stringify(lightweightMsgs));
+    } catch (e) {
+      console.warn('Could not persist messages to localStorage:', e);
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    saveNotificationSettings(notificationSettings);
+  }, [notificationSettings]);
+
+  // Stable refs for background reminder tickers to prevent dependency loop re-renders
+  const notificationSettingsRef = useRef<NotificationSettings>(notificationSettings);
+  notificationSettingsRef.current = notificationSettings;
+
+  const currentProfileRef = useRef<UserProfile>(currentProfile);
+  currentProfileRef.current = currentProfile;
+
+  const lastTriggerMinuteRef = useRef<string>('');
+
+  // Background ticker loop for scheduled daily health reminders
+  useEffect(() => {
+    if (!notificationSettings.enabled) return;
+
+    const checkReminderSchedule = () => {
+      const settings = notificationSettingsRef.current;
+      if (!settings.enabled) return;
+
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${hh}:${mm}`;
+      const todayDateStr = now.toISOString().split('T')[0];
+      const currentMinuteKey = `${todayDateStr}_${currentTimeStr}`;
+
+      const targetTimes = [
+        settings.time || '09:00',
+        ...(settings.scheduleSlots || []),
+      ];
+
+      const isScheduledMatch = targetTimes.includes(currentTimeStr);
+
+      if (
+        isScheduledMatch &&
+        lastTriggerMinuteRef.current !== currentMinuteKey &&
+        settings.lastTriggeredDate !== currentMinuteKey
+      ) {
+        lastTriggerMinuteRef.current = currentMinuteKey;
+
+        const profileName = currentProfileRef.current?.name || 'User';
+        const content = getReminderContent(
+          settings.reminderType || 'both',
+          profileName
+        );
+
+        // Trigger browser native notification
+        dispatchBrowserNotification(content, () => {
+          if (content.reminderType === 'metrics') {
+            setIsProfileModalOpen(true);
+          } else {
+            setIsClinicalBriefOpen(true);
+          }
+        });
+
+        // Trigger in-app interactive toast
+        setActiveReminderToast(content);
+
+        // Sound selected ringtone / music if enabled
+        if (settings.soundEnabled) {
+          playNotificationRingtone(
+            settings.ringtoneSound || 'harmonic_chime',
+            settings.ringtoneDuration || 4,
+            settings.ringtoneVolume ?? 0.85,
+            settings.customAudioUrl
+          );
+        }
+
+        // Save lastTriggeredDate without infinite re-render loop
+        setNotificationSettings((prev) => ({
+          ...prev,
+          lastTriggeredDate: currentMinuteKey,
+        }));
+      }
+    };
+
+    checkReminderSchedule();
+    const timer = setInterval(checkReminderSchedule, 10000);
+    return () => clearInterval(timer);
+  }, [notificationSettings.enabled, notificationSettings.time]);
+
+  const handleTriggerTestNotification = (customSettings?: NotificationSettings) => {
+    const config = customSettings || notificationSettings;
+    const content = getReminderContent(config.reminderType, currentProfile.name);
+
+    // Dispatch native browser notification
+    dispatchBrowserNotification(content, () => {
+      if (content.reminderType === 'metrics') {
+        setIsProfileModalOpen(true);
+      } else {
+        setIsClinicalBriefOpen(true);
+      }
+    });
+
+    // Display in-app toast preview
+    setActiveReminderToast(content);
+
+    // Sound selected ringtone / custom audio if enabled
+    if (config.soundEnabled) {
+      playNotificationRingtone(
+        config.ringtoneSound || 'harmonic_chime',
+        config.ringtoneDuration || 4,
+        config.ringtoneVolume ?? 0.8,
+        config.customAudioUrl
+      );
+    }
+  };
+
+  const handleSnooze = (minutes: number) => {
+    setActiveReminderToast(null);
+    stopActiveRingtone();
+    setTimeout(() => {
+      const content = getReminderContent(
+        notificationSettings.reminderType,
+        currentProfile.name
+      );
+      setActiveReminderToast(content);
+      if (notificationSettings.soundEnabled) {
+        playNotificationRingtone(
+          notificationSettings.ringtoneSound || 'harmonic_chime',
+          notificationSettings.ringtoneDuration || 4,
+          notificationSettings.ringtoneVolume ?? 0.8,
+          notificationSettings.customAudioUrl
+        );
+      }
+    }, minutes * 60 * 1000);
+  };
+
+  const handleLoginSuccess = (user: AuthUser) => {
+    setCurrentUser(user);
+    // Sync authenticated user's name into profile
+    setCurrentProfile((prev) => ({
+      ...prev,
+      name: user.name || prev.name,
+    }));
+    setIsAuthModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('pulsehealth_auth_user');
+    setIsAuthModalOpen(true);
+  };
+
+  // Clear cache and reset local storage state
+  const handleClearCache = () => {
+    localStorage.removeItem('pulsehealth_profile');
+    localStorage.removeItem('pulsehealth_messages');
+    localStorage.removeItem('pulsehealth_auth_user');
+    localStorage.removeItem('pulsehealth_notification_settings');
+    localStorage.removeItem('medtrack_notification_settings');
+    localStorage.removeItem('medtrack_profile');
+    setCurrentProfile({ ...PRESET_PROFILES[0] });
+    setMessages([]);
+    setCurrentUser(null);
+    setNotificationSettings(getStoredNotificationSettings());
+  };
+
+  // Force data refresh & biometric calculation sync
+  const handleDataRefresh = () => {
+    setCurrentProfile((prev) => {
+      const updated = { ...prev };
+      localStorage.setItem('pulsehealth_profile', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Handle new message consultation
+  const handleSendMessage = async (text: string, attachments: AttachmentItem[] = []) => {
+    const userMessageId = `msg_user_${Date.now()}`;
+    const userMsg: ConsultationMessage = {
+      id: userMessageId,
+      role: 'user',
+      content: text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
+    };
+
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
+    setIsLoading(true);
+
+    try {
+      // Check if we have specialized attachments (lab report vs rash) to run parallel extraction
+      const imageAttachment = attachments.find((a) => a.type === 'image' || a.category === 'rash');
+      const documentAttachment = attachments.find(
+        (a) => a.type === 'document' || a.category === 'lab_report'
+      );
+
+      // Execute main consultation, vision prescreening, and biomarker analysis in PARALLEL
+      const consultPromise = fetch('/api/consult', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userProfile: currentProfile,
+          message: text,
+          attachments,
+          chatHistory: newHistory.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      }).then(async (res) => {
+        const data = await res.json();
+        if (!data || !data.success) {
+          throw new Error(data?.error || 'Consultation service temporarily unavailable');
+        }
+        return data;
+      });
+
+      const visionPromise = imageAttachment
+        ? fetch('/api/vision-prescreen', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              attachment: imageAttachment,
+              symptomNotes: text,
+              userProfile: currentProfile,
+            }),
+          })
+            .then((res) => res.json())
+            .then((json) => (json?.success && json?.data ? json.data : undefined))
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
+
+      const biomarkerPromise = documentAttachment
+        ? fetch('/api/extract-biomarkers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              attachment: documentAttachment,
+              userProfile: currentProfile,
+            }),
+          })
+            .then((res) => res.json())
+            .then((json) => (json?.success && json?.data ? json.data : undefined))
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
+
+      const [consultResult, visionPreScreeningData, biomarkerAnalysisData] = await Promise.all([
+        consultPromise,
+        visionPromise,
+        biomarkerPromise,
+      ]);
+
+      const isEmergency =
+        consultResult.triageLevel?.includes('Level 4') ||
+        consultResult.text.includes('LEVEL 4') ||
+        consultResult.text.includes('Critical Emergency');
+
+      if (isEmergency) {
+        setIsEmergencyBannerOpen(true);
+        playNotificationRingtone('clinical_pager', 3, 0.95);
+      } else {
+        playGentleNotificationChime();
+      }
+
+      const assistantMsg: ConsultationMessage = {
+        id: `msg_asst_${Date.now()}`,
+        role: isEmergency ? 'emergency' : 'assistant',
+        content: consultResult.text,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        triageLevel: consultResult.triageLevel as TriageLevel,
+        sources: consultResult.sources || [],
+        ragGrounding: consultResult.ragGrounding || undefined,
+        visionPreScreening: visionPreScreeningData || undefined,
+        biomarkerAnalysis: biomarkerAnalysisData || undefined,
+        isEmergencyOverride: isEmergency,
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
+      console.error('Consultation error:', err);
+      const errorMsg: ConsultationMessage = {
+        id: `msg_err_${Date.now()}`,
+        role: 'assistant',
+        content: `### ⚠️ Consultation Processing Notice\nWe were unable to complete the analysis at this moment: *${
+          err.message || 'Network or API timeout'
+        }*.\n\nPlease check your internet connection or verify your API settings in Settings > Secrets.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        triageLevel: 'Level 2: Routine Consultation',
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handler for 1-click test scenarios
+  const handleSelectScenario = (
+    prompt: string,
+    attachments: AttachmentItem[],
+    targetProfile?: UserProfile
+  ) => {
+    if (targetProfile) {
+      setCurrentProfile(targetProfile);
+    }
+    handleSendMessage(prompt, attachments);
+  };
+
+  const handleResetConsultation = () => {
+    stopActiveRingtone();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setMessages([]);
+    setIsEmergencyBannerOpen(false);
+    localStorage.removeItem('pulsehealth_messages');
+  };
+
+  return (
+    <div className="min-h-screen bg-linear-to-b from-[#F0FDF4]/30 via-[#F8FAFC] to-[#F0F9FF]/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex flex-col font-sans selection:bg-teal-200 dark:selection:bg-teal-800 selection:text-teal-950 dark:selection:text-teal-100 transition-colors duration-300">
+      {/* Top Header */}
+      <Header
+        currentProfile={currentProfile}
+        currentUser={currentUser}
+        notificationSettings={notificationSettings}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode((prev) => !prev)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
+        onTriggerEmergencyBanner={() => setIsEmergencyBannerOpen(true)}
+        onOpenClinicalBrief={() => setIsClinicalBriefOpen(true)}
+        onResetConsultation={handleResetConsultation}
+        onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
+        onOpenTesterHub={() => setIsTesterHubOpen(true)}
+        onOpenOpeningScreen={() => setIsOpeningScreenOpen(true)}
+        onOpenPharmacyLocator={() => {
+          setPharmacyInitialMeds(currentProfile.healthHistory.currentMedications || []);
+          setIsPharmacyModalOpen(true);
+        }}
+      />
+
+      {/* Prominent Daily Health Notification & Reminder Bar */}
+      <NotificationBar
+        settings={notificationSettings}
+        onUpdateSettings={(newSettings) => setNotificationSettings(newSettings)}
+        onTriggerTestNotification={handleTriggerTestNotification}
+        onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        currentProfile={currentProfile}
+      />
+
+      {/* Front-End Welcome & Opening Screen with Custom Logo */}
+      {isOpeningScreenOpen && (
+        <OpeningScreen
+          userProfile={currentProfile}
+          onStartConsultation={() => {
+            setIsOpeningScreenOpen(false);
+            sessionStorage.setItem('medtrack_seen_opening_screen', 'true');
+          }}
+          onOpenProfile={() => {
+            setIsOpeningScreenOpen(false);
+            setIsProfileModalOpen(true);
+          }}
+          onOpenReminders={() => {
+            setIsOpeningScreenOpen(false);
+            setIsReminderSettingsOpen(true);
+          }}
+        />
+      )}
+
+      {/* Emergency Red-Flag Banner (Sticky/Dismissable) */}
+      <EmergencyBanner
+        isOpen={isEmergencyBannerOpen}
+        onClose={() => setIsEmergencyBannerOpen(false)}
+      />
+
+      {/* Main Consultation Feed */}
+      <main className="flex-1 overflow-y-auto">
+        <ConsultationFeed
+          messages={messages}
+          currentProfile={currentProfile}
+          isLoading={isLoading}
+          onOpenProfileModal={() => setIsProfileModalOpen(true)}
+          onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
+          onOpenPharmacyLocator={(meds) => {
+            if (meds && meds.length > 0) {
+              setPharmacyInitialMeds(meds);
+            } else {
+              setPharmacyInitialMeds(currentProfile.healthHistory.currentMedications || []);
+            }
+            setIsPharmacyModalOpen(true);
+          }}
+        />
+      </main>
+
+      {/* Multimodal Input Toolbar */}
+      <InputToolbar
+        onSendMessage={handleSendMessage}
+        isLoading={isLoading}
+        onOpenSampleScenarios={() => setIsSampleScenariosOpen(true)}
+      />
+
+      {/* User Profile & Baseline Editor Modal */}
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentProfile={currentProfile}
+        onSaveProfile={(updated) => setCurrentProfile(updated)}
+        onClearCache={handleClearCache}
+        onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
+        messages={messages}
+        onRefreshData={handleDataRefresh}
+        onOpenPharmacyLocator={(meds) => {
+          if (meds && meds.length > 0) {
+            setPharmacyInitialMeds(meds);
+          }
+          setIsPharmacyModalOpen(true);
+        }}
+      />
+
+      {/* Interactive Sample Scenarios Modal */}
+      <SampleScenariosModal
+        isOpen={isSampleScenariosOpen}
+        onClose={() => setIsSampleScenariosOpen(false)}
+        onSelectScenario={handleSelectScenario}
+      />
+
+      {/* Doctor Printable Clinical Summary Modal */}
+      <ClinicalBriefModal
+        isOpen={isClinicalBriefOpen}
+        onClose={() => setIsClinicalBriefOpen(false)}
+        currentProfile={currentProfile}
+        messages={messages}
+      />
+
+      {/* Google Maps Medical Store & Pharmacy Locator with GPS */}
+      <PharmacyLocatorModal
+        isOpen={isPharmacyModalOpen}
+        onClose={() => setIsPharmacyModalOpen(false)}
+        userProfile={currentProfile}
+        initialMedicines={pharmacyInitialMeds}
+      />
+
+      {/* Daily Scheduled Reminder & Notification Settings Modal */}
+      <ReminderSettingsModal
+        isOpen={isReminderSettingsOpen}
+        onClose={() => setIsReminderSettingsOpen(false)}
+        settings={notificationSettings}
+        onSaveSettings={(newSettings) => setNotificationSettings(newSettings)}
+        onTriggerTestNotification={handleTriggerTestNotification}
+        currentProfile={currentProfile}
+      />
+
+      {/* Multi-User Personas & Audio Alarm QA Testing Hub */}
+      <TesterHubModal
+        isOpen={isTesterHubOpen}
+        onClose={() => setIsTesterHubOpen(false)}
+        currentProfile={currentProfile}
+        onSelectProfile={(p) => setCurrentProfile(p)}
+        currentUser={currentUser}
+        onLoginAsUser={(u) => handleLoginSuccess(u)}
+        onSeedConsultation={(seeded) => setMessages(seeded)}
+        onClearConsultation={() => setMessages([])}
+        notificationSettings={notificationSettings}
+        onTriggerTestNotification={() => handleTriggerTestNotification()}
+        onTriggerEmergencyBanner={() => setIsEmergencyBannerOpen(true)}
+        onOpenClinicalBrief={() => setIsClinicalBriefOpen(true)}
+        onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
+        onOpenPharmacyLocator={() => {
+          setPharmacyInitialMeds(currentProfile.healthHistory.currentMedications || []);
+          setIsPharmacyModalOpen(true);
+        }}
+      />
+
+      {/* Interactive In-App Scheduled Reminder Toast Prompt */}
+      <ReminderToast
+        content={activeReminderToast}
+        onClose={() => {
+          stopActiveRingtone();
+          setActiveReminderToast(null);
+        }}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        onOpenClinicalBrief={() => setIsClinicalBriefOpen(true)}
+        onSnooze={handleSnooze}
+        notificationSettings={notificationSettings}
+        onStopAudio={stopActiveRingtone}
+      />
+
+      {/* Authentication Login / Sign In Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
+    </div>
+  );
+}
